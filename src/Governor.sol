@@ -2,18 +2,12 @@
 pragma solidity 0.8.19;
 
 import "openzeppelin-contracts/contracts/governance/Governor.sol";
-import "openzeppelin-contracts/contracts/governance/extensions/GovernorVotesComp.sol";
-import "openzeppelin-contracts/contracts/governance/compatibility/GovernorCompatibilityBravo.sol";
 import "openzeppelin-contracts/contracts/governance/extensions/GovernorSettings.sol";
+import "openzeppelin-contracts/contracts/governance/extensions/GovernorCountingSimple.sol";
+import "openzeppelin-contracts/contracts/governance/extensions/GovernorVotesComp.sol";
 import "./GovernorTimelockDSPause.sol";
 
-contract TaiGovernor is
-    Governor,
-    GovernorSettings,
-    GovernorCompatibilityBravo,
-    GovernorVotesComp,
-    GovernorTimelockDSPause
-{
+contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotesComp, GovernorTimelockDSPause {
     constructor(
         ERC20VotesComp _token,
         IDSPause _pause,
@@ -27,9 +21,7 @@ contract TaiGovernor is
         GovernorTimelockDSPause(_pause)
     {}
 
-    function quorum(
-        uint256 /*blockNumber*/
-    ) public pure override returns (uint256) {
+    function quorum(uint256 /*blockNumber*/) public pure override returns (uint256) {
         return 30000e18;
     }
 
@@ -51,25 +43,18 @@ contract TaiGovernor is
         return super.votingPeriod();
     }
 
-    function state(
-        uint256 proposalId
-    )
+    function state(uint256 proposalId)
         public
         view
-        override(Governor, IGovernor, GovernorTimelockDSPause)
+        override(Governor, GovernorTimelockDSPause)
         returns (ProposalState)
     {
         return super.state(proposalId);
     }
 
-    function propose(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        string memory description
-    )
+    function propose(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description)
         public
-        override(Governor, GovernorCompatibilityBravo, IGovernor)
+        override(Governor, IGovernor)
         returns (uint256)
     {
         return super.propose(targets, values, calldatas, description);
@@ -84,22 +69,18 @@ contract TaiGovernor is
         return super.proposalThreshold();
     }
 
-    function _execute(
-        uint256 proposalId,
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) internal override(Governor, GovernorTimelockDSPause) {
+    function _execute(uint256 proposalId, address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
+        internal
+        override(Governor, GovernorTimelockDSPause)
+    {
         super._execute(proposalId, targets, values, calldatas, descriptionHash);
     }
 
-    function _cancel(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) internal override(Governor, GovernorTimelockDSPause) returns (uint256) {
+    function _cancel(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
+        internal
+        override(Governor, GovernorTimelockDSPause)
+        returns (uint256)
+    {
         return super._cancel(targets, values, calldatas, descriptionHash);
     }
 
@@ -112,27 +93,12 @@ contract TaiGovernor is
         return super._executor();
     }
 
-    function supportsInterface(
-        bytes4 interfaceId
-    )
+    function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(Governor, IERC165, GovernorTimelockDSPause)
+        override(Governor, GovernorTimelockDSPause)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
-    }
-
-    function cancel(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    )
-        public
-        override(Governor, IGovernor, GovernorCompatibilityBravo)
-        returns (uint256)
-    {
-        return super.cancel(targets, values, calldatas, descriptionHash);
     }
 }

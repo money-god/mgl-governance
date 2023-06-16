@@ -103,7 +103,7 @@ abstract contract GovernorTimelockDSPause is IGovernorTimelock, Governor {
     ) public virtual override returns (uint256) {
         uint256 proposalId = hashProposal(
             targets,
-            new uint256[](0),
+            new uint256[](targets.length),
             calldatas,
             descriptionHash
         ); // update
@@ -142,7 +142,6 @@ abstract contract GovernorTimelockDSPause is IGovernorTimelock, Governor {
     ) internal virtual override {
         uint256 eta = proposalEta(proposalId);
         require(eta > 0, "GovernorTimelockCompound: proposal not yet queued");
-        Address.sendValue(payable(_executor()), msg.value);
         for (uint256 i = 0; i < targets.length; ++i) {
             _pause.executeTransaction(
                 targets[i],
@@ -165,7 +164,7 @@ abstract contract GovernorTimelockDSPause is IGovernorTimelock, Governor {
     ) internal virtual override returns (uint256) {
         uint256 proposalId = super._cancel(
             targets,
-            new uint256[](0),
+            new uint256[](targets.length),
             calldatas,
             descriptionHash
         );
