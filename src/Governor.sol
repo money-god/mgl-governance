@@ -8,21 +8,27 @@ import "openzeppelin-contracts/contracts/governance/extensions/GovernorVotesComp
 import "./GovernorTimelockDSPause.sol";
 
 contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotesComp, GovernorTimelockDSPause {
+    address public immutable tokenEmitter;
+
     constructor(
         ERC20VotesComp _token,
         IDSPause _pause,
         uint256 _votingDelay,
         uint256 _votingPeriod,
-        uint256 _proposalThreshold
+        uint256 _proposalThreshold,
+        address _tokenEmitter
     )
         Governor("TaiGovernor")
         GovernorSettings(_votingDelay, _votingPeriod, _proposalThreshold)
         GovernorVotesComp(_token)
         GovernorTimelockDSPause(_pause)
-    {}
+    {
+        tokenEmitter = _tokenEmitter;
+    }
 
-    function quorum(uint256 /*blockNumber*/) public pure override returns (uint256) {
-        return 30000e18;
+    function quorum(uint256 /*blockNumber*/) public view override returns (uint256) {
+        uint256 circulatingSupply = token.totalSupply() - token.balanceOf(tokenEmitter);
+        return (circulatingSupply * 3) / 100;
     }
 
     function votingDelay()
