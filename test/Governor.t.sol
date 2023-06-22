@@ -20,6 +20,7 @@ contract GovernorTest is Test {
     DSDelegateToken public token;
     DSPause public pause;
     address public govActions;
+    address public emitter = address(0xabc);
 
     uint256 public constant VOTING_DELAY = 2 days / 12; // convert to blocks
     uint256 public constant VOTING_PERIOD = 7 days / 12; // convert to blocks
@@ -45,7 +46,8 @@ contract GovernorTest is Test {
             IDSPause(address(pause)),
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            emitter
         );
 
         // transfer pause ownership to governor
@@ -103,6 +105,7 @@ contract GovernorTest is Test {
         assertEq(governor.votingPeriod(), VOTING_PERIOD);
         assertEq(governor.proposalThreshold(), PROPOSAL_THRESHOLD);
         assertEq(address(governor.timelock()), address(pause));
+        assertEq(governor.quorum(0), 0); // 3% of the supply
     }
 
     function testPropose() public {
@@ -213,7 +216,7 @@ contract GovernorTest is Test {
 
     function testDefeatProposal() public {
         address alice = address(0x123);
-        token.mint(alice, 10001 ether);
+        token.mint(alice, 20001 ether);
         vm.prank(alice);
         token.delegate(alice);
 
@@ -315,5 +318,11 @@ contract GovernorTest is Test {
             keccak256("test proposal")
         );
         assertEq(uint(governor.state(proposalId)), 1); // active
+    }
+
+    function testQuorum() public {
+        token.mint(address(0xcdf), 1000 ether);
+        token.mint(emitter, 1000 ether); // these are not in circulation
+        assertEq(governor.quorum(0), 30 ether); // 3% of circulating supply
     }
 }
