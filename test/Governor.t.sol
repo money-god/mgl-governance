@@ -13,6 +13,19 @@ contract GovActions {
         );
         require(success);
     }
+
+    function setQuorumPercentage(
+        address target,
+        uint256 newPercentage
+    ) public virtual {
+        (bool success, ) = target.call(
+            abi.encodeWithSelector(
+                TaiGovernor.setQuorumPercentage.selector,
+                newPercentage
+            )
+        );
+        require(success);
+    }
 }
 
 contract GovernorTest is Test {
@@ -106,6 +119,9 @@ contract GovernorTest is Test {
         assertEq(governor.proposalThreshold(), PROPOSAL_THRESHOLD);
         assertEq(address(governor.timelock()), address(pause));
         assertEq(governor.quorum(0), 0); // 3% of the supply
+        assertEq(governor.quorumPercentage(), 30); // 3%, default
+        assertEq(governor.MIN_QUORUM_PERCENTAGE(), 30); // 3%, constant
+        assertEq(governor.MAX_QUORUM_PERCENTAGE(), 50); // 5%, constant
     }
 
     function testPropose() public {
@@ -124,11 +140,12 @@ contract GovernorTest is Test {
             uint(governor.proposalDeadline(proposalId)),
             block.number + VOTING_DELAY + VOTING_PERIOD
         );
-        assertEq(governor.proposalProposer(proposalId), address(this));
     }
 
     function testProposalBelowThreshold() public {
-        vm.expectRevert("Governor: proposer votes below proposal threshold");
+        vm.expectRevert(
+            "GovernorCompatibilityBravo: proposer votes below proposal threshold"
+        );
         governor.propose(targets, new uint[](1), calldatas, "test proposal");
     }
 
@@ -257,72 +274,82 @@ contract GovernorTest is Test {
         );
     }
 
-    function testCancelProposal() public {
-        testPropose();
-        assertEq(uint(governor.state(proposalId)), 0); // pending
+    function testQuorum() public {
+        token.mint(address(0xcdf), 1000 ether);
+        token.mint(emitter, 1000 ether); // these are not in circulation
+        assertEq(governor.quorum(0), 30 ether); // 3% of circulating supply
+    }
 
-        governor.cancel(
+    function testSetQuorum() public {
+        token.mint(address(this), 20000 ether);
+        token.delegate(address(this));
+        vm.roll(block.number + 1);
+
+        calldatas[0] = abi.encodeWithSelector(
+            GovActions.setQuorumPercentage.selector,
+            address(governor),
+            40
+        );
+        proposalId = governor.hashProposal(
             targets,
             new uint[](1),
             calldatas,
-            keccak256("test proposal")
+            keccak256(bytes("test proposal"))
         );
-        assertEq(uint(governor.state(proposalId)), 2); // cancelled
 
-        // try voting
-        vm.expectRevert("Governor: vote not currently active");
+        governor.propose(targets, new uint[](1), calldatas, "test proposal");
+
+        vm.roll(block.number + VOTING_DELAY + 1);
+        assertEq(uint(governor.state(proposalId)), 1); // active
+
         governor.castVote(proposalId, 1); // support
 
-        // try to execute
-        vm.expectRevert("Governor: proposal not successful");
-        governor.execute(
-            targets,
-            new uint[](1),
-            calldatas,
-            keccak256("test proposal")
-        );
+        vm.roll(block.number + VOTING_PERIOD);
+        assertEq(uint(governor.state(proposalId)), 4); // succeeded
 
-        // try to queue
-        vm.expectRevert("Governor: proposal not successful");
         governor.queue(
             targets,
             new uint[](1),
             calldatas,
             keccak256("test proposal")
         );
-    }
+        assertEq(uint(governor.state(proposalId)), 5); // queued
 
-    function testCancelProposalInvalid() public {
-        testPropose();
-        assertEq(uint(governor.state(proposalId)), 0); // pending
-
-        vm.expectRevert("Governor: only proposer can cancel");
-        vm.prank(address(0x1));
-        governor.cancel(
+        vm.warp(block.timestamp + PAUSE_DELAY);
+        governor.execute(
             targets,
             new uint[](1),
             calldatas,
             keccak256("test proposal")
         );
-        assertEq(uint(governor.state(proposalId)), 0); // pending
-
-        vm.roll(block.number + VOTING_DELAY + 1);
-        assertEq(uint(governor.state(proposalId)), 1); // active
-
-        vm.expectRevert("Governor: too late to cancel");
-        vm.prank(address(0x1));
-        governor.cancel(
-            targets,
-            new uint[](1),
-            calldatas,
-            keccak256("test proposal")
-        );
-        assertEq(uint(governor.state(proposalId)), 1); // active
+        assertEq(uint(governor.state(proposalId)), 7); // executed
+        assertEq(governor.quorumPercentage(), 40);
+        assertEq(governor.quorum(0), 800 ether); // 4% of circulating supply
     }
 
-    function testQuorum() public {
-        token.mint(address(0xcdf), 1000 ether);
-        token.mint(emitter, 1000 ether); // these are not in circulation
-        assertEq(governor.quorum(0), 30 ether); // 3% of circulating supply
+    function testSetQuorumInvalid() public {
+        token.mint(address(0xcdf), 100 ether);
+
+        // set one time
+        vm.startPrank(address(pause.proxy()));
+        governor.setQuorumPercentage(50); // 5%, max
+
+        assertEq(governor.quorumPercentage(), 50);
+        assertEq(governor.quorum(0), 5 ether); // 5% of circulating supply
+
+        governor.setQuorumPercentage(30); // 3%, min
+
+        assertEq(governor.quorumPercentage(), 30);
+        assertEq(governor.quorum(0), 3 ether); // 3% of circulating supply
+
+        vm.expectRevert("Governor: invalid quorum");
+        governor.setQuorumPercentage(51);
+
+        vm.expectRevert("Governor: invalid quorum");
+        governor.setQuorumPercentage(29);
+
+        // state is same
+        assertEq(governor.quorumPercentage(), 30);
+        assertEq(governor.quorum(0), 3 ether); // 3% of circulating supply
     }
 }
