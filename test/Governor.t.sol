@@ -140,6 +140,7 @@ contract GovernorTest is Test {
             uint(governor.proposalDeadline(proposalId)),
             block.number + VOTING_DELAY + VOTING_PERIOD
         );
+        assertEq(governor.proposalProposer(proposalId), address(this));
     }
 
     function testProposalBelowThreshold() public {
@@ -274,6 +275,71 @@ contract GovernorTest is Test {
         );
     }
 
+    function testCancelProposal() public {
+        testPropose();
+        assertEq(uint(governor.state(proposalId)), 0); // pending
+
+        governor.cancel(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+        assertEq(uint(governor.state(proposalId)), 2); // cancelled
+
+        // try voting
+        vm.expectRevert("Governor: vote not currently active");
+        governor.castVote(proposalId, 1); // support
+
+        // try to execute
+        vm.expectRevert("Governor: proposal not successful");
+        governor.execute(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+
+        // try to queue
+        vm.expectRevert("Governor: proposal not successful");
+        governor.queue(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+    }
+
+    function testCancelProposalInvalid() public {
+        testPropose();
+        assertEq(uint(governor.state(proposalId)), 0); // pending
+
+        vm.expectRevert("Governor: only proposer can cancel");
+        vm.prank(address(0x1));
+        governor.cancel(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+        assertEq(uint(governor.state(proposalId)), 0); // pending
+
+        vm.roll(block.number + VOTING_DELAY + 1);
+        assertEq(uint(governor.state(proposalId)), 1); // active
+
+        vm.expectRevert(
+            "Governor: proposal can only be cancelled while pending."
+        );
+        vm.prank(address(0x1));
+        governor.cancel(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+        assertEq(uint(governor.state(proposalId)), 1); // active
+    }
+
     function testQuorum() public {
         token.mint(address(0xcdf), 1000 ether);
         token.mint(emitter, 1000 ether); // these are not in circulation
@@ -351,5 +417,67 @@ contract GovernorTest is Test {
         // state is same
         assertEq(governor.quorumPercentage(), 30);
         assertEq(governor.quorum(0), 3 ether); // 3% of circulating supply
+    }
+
+    function testExecuteProposalAlreadyExecutedPause() public {
+        address alice = address(0x123);
+        token.mint(alice, 10001 ether);
+        vm.prank(alice);
+        token.delegate(alice);
+
+        testPropose();
+        assertEq(uint(governor.state(proposalId)), 0); // pending
+
+        // try to vote before it starts
+        vm.expectRevert("Governor: vote not currently active");
+        governor.castVote(proposalId, 1); // support
+
+        vm.roll(block.number + VOTING_DELAY + 1);
+        assertEq(uint(governor.state(proposalId)), 1); // active
+
+        governor.castVote(proposalId, 1); // support
+
+        vm.prank(alice);
+        governor.castVote(proposalId, 1); // support
+
+        vm.roll(block.number + VOTING_PERIOD);
+        assertEq(uint(governor.state(proposalId)), 4); // succeeded
+
+        // try to execute without queueing
+        vm.expectRevert("GovernorTimelockCompound: proposal not yet queued");
+        governor.execute(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+
+        governor.queue(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+        assertEq(uint(governor.state(proposalId)), 5); // queued
+
+        vm.warp(block.timestamp + PAUSE_DELAY);
+        pause.executeTransaction(
+            targets[0],
+            _getExtCodeHash(targets[0]),
+            calldatas[0],
+            block.timestamp
+        );
+        assertEq(uint(governor.state(proposalId)), 5); // queued
+        assertEq(pause.owner(), address(this));
+
+        governor.execute(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+        
+        assertEq(uint(governor.state(proposalId)), 7); // executed
+        assertEq(pause.owner(), address(this));
     }
 }

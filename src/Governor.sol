@@ -19,6 +19,8 @@ contract TaiGovernor is
     uint256 public constant MIN_QUORUM_PERCENTAGE = 30;
     uint256 public constant MAX_QUORUM_PERCENTAGE = 50;
 
+    mapping (uint256 => address) internal _proposers;
+
     event QuorumPercentageSet(uint256 oldPercentage, uint256 newPercentage);
 
     constructor(
@@ -90,8 +92,9 @@ contract TaiGovernor is
         uint256[] memory values,
         bytes[] memory calldatas,
         string memory description
-    ) public override(Governor, IGovernor) returns (uint256) {
-        return super.propose(targets, values, calldatas, description);
+    ) public override(Governor, IGovernor) returns (uint256 proposalId) {
+        proposalId = super.propose(targets, values, calldatas, description);
+        _proposers[proposalId] = msg.sender;
     }
 
     function proposalThreshold()
@@ -101,6 +104,30 @@ contract TaiGovernor is
         returns (uint256)
     {
         return super.proposalThreshold();
+    }
+
+    function cancel(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 descriptionHash
+    ) public virtual returns (uint256) {
+        uint256 proposalId = hashProposal(
+            targets,
+            values,
+            calldatas,
+            descriptionHash
+        );
+        ProposalState currentState = state(proposalId);
+        require(
+            currentState == ProposalState.Pending,
+            "Governor: proposal can only be cancelled while pending."
+        );
+        require(
+            _msgSender() == proposalProposer(proposalId),
+            "Governor: only proposer can cancel"
+        );
+        return _cancel(targets, values, calldatas, descriptionHash);
     }
 
     function _execute(
@@ -132,9 +159,18 @@ contract TaiGovernor is
     }
 
     /**
+     * @dev Returns the account that created a given proposal.
+     */
+    function proposalProposer(
+        uint256 proposalId
+    ) public view virtual returns (address) {
+        return _proposers[proposalId];
+    }
+
+    /**
      * @dev Internal setter for the quorum percentage.
      *
-     * Emits a {QuorumPercentageSet} event.
+     * Emits a {VotingDelaySet} event.
      */
     function _setQuorumPercentage(uint256 newPercentage) internal virtual {
         require(
