@@ -352,4 +352,66 @@ contract GovernorTest is Test {
         assertEq(governor.quorumPercentage(), 30);
         assertEq(governor.quorum(0), 3 ether); // 3% of circulating supply
     }
+
+    function testExecuteProposalAlreadyExecutedPause() public {
+        address alice = address(0x123);
+        token.mint(alice, 10001 ether);
+        vm.prank(alice);
+        token.delegate(alice);
+
+        testPropose();
+        assertEq(uint(governor.state(proposalId)), 0); // pending
+
+        // try to vote before it starts
+        vm.expectRevert("Governor: vote not currently active");
+        governor.castVote(proposalId, 1); // support
+
+        vm.roll(block.number + VOTING_DELAY + 1);
+        assertEq(uint(governor.state(proposalId)), 1); // active
+
+        governor.castVote(proposalId, 1); // support
+
+        vm.prank(alice);
+        governor.castVote(proposalId, 1); // support
+
+        vm.roll(block.number + VOTING_PERIOD);
+        assertEq(uint(governor.state(proposalId)), 4); // succeeded
+
+        // try to execute without queueing
+        vm.expectRevert("GovernorTimelockCompound: proposal not yet queued");
+        governor.execute(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+
+        governor.queue(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+        assertEq(uint(governor.state(proposalId)), 5); // queued
+
+        vm.warp(block.timestamp + PAUSE_DELAY);
+        pause.executeTransaction(
+            targets[0],
+            _getExtCodeHash(targets[0]),
+            calldatas[0],
+            block.timestamp
+        );
+        assertEq(uint(governor.state(proposalId)), 5); // queued
+        assertEq(pause.owner(), address(this));
+
+        governor.execute(
+            targets,
+            new uint[](1),
+            calldatas,
+            keccak256("test proposal")
+        );
+
+        assertEq(uint(governor.state(proposalId)), 7); // executed
+        assertEq(pause.owner(), address(this));
+    }
 }
