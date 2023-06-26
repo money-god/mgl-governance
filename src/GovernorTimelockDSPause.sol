@@ -132,6 +132,7 @@ abstract contract GovernorTimelockDSPause is IGovernorTimelock, Governor {
 
     /**
      * @dev Overridden execute function that run the already queued proposal through the timelock.
+     * @dev If pause call fails it will mark the proposal as executed anyway (this can hapen due to logic error on proposal or a proposal that was already executed directly on pause).
      */
     function _execute(
         uint256 proposalId,
@@ -143,12 +144,14 @@ abstract contract GovernorTimelockDSPause is IGovernorTimelock, Governor {
         uint256 eta = proposalEta(proposalId);
         require(eta > 0, "GovernorTimelockCompound: proposal not yet queued");
         for (uint256 i = 0; i < targets.length; ++i) {
-            _pause.executeTransaction(
-                targets[i],
-                _getExtCodeHash(targets[i]),
-                calldatas[i],
-                eta
-            );
+            try
+                _pause.executeTransaction(
+                    targets[i],
+                    _getExtCodeHash(targets[i]),
+                    calldatas[i],
+                    eta
+                )
+            {} catch {}
         }
     }
 

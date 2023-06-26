@@ -7,8 +7,21 @@ import "openzeppelin-contracts/contracts/governance/extensions/GovernorCountingS
 import "openzeppelin-contracts/contracts/governance/extensions/GovernorVotesComp.sol";
 import "./GovernorTimelockDSPause.sol";
 
-contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotesComp, GovernorTimelockDSPause {
+contract TaiGovernor is
+    Governor,
+    GovernorSettings,
+    GovernorCountingSimple,
+    GovernorVotesComp,
+    GovernorTimelockDSPause
+{
     address public immutable tokenEmitter;
+    uint256 public quorumPercentage = 30; // default 30 == 3%
+    uint256 public constant MIN_QUORUM_PERCENTAGE = 30;
+    uint256 public constant MAX_QUORUM_PERCENTAGE = 50;
+
+    mapping (uint256 => address) internal _proposers;
+
+    event QuorumPercentageSet(uint256 oldPercentage, uint256 newPercentage);
 
     constructor(
         ERC20VotesComp _token,
@@ -26,9 +39,23 @@ contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, Gove
         tokenEmitter = _tokenEmitter;
     }
 
-    function quorum(uint256 /*blockNumber*/) public view override returns (uint256) {
-        uint256 circulatingSupply = token.totalSupply() - token.balanceOf(tokenEmitter);
-        return (circulatingSupply * 3) / 100;
+    /**
+     * @dev Update the quorum percentage. This operation can only be performed through a governance proposal.
+     *
+     * Emits a {QuotumPercentageSet} event.
+     */
+    function setQuorumPercentage(
+        uint256 newPercentage
+    ) public virtual onlyGovernance {
+        _setQuorumPercentage(newPercentage);
+    }
+
+    function quorum(
+        uint256 /*blockNumber*/
+    ) public view override returns (uint256) {
+        uint256 circulatingSupply = token.totalSupply() -
+            token.balanceOf(tokenEmitter);
+        return (circulatingSupply * quorumPercentage) / 1000;
     }
 
     function votingDelay()
@@ -49,7 +76,9 @@ contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, Gove
         return super.votingPeriod();
     }
 
-    function state(uint256 proposalId)
+    function state(
+        uint256 proposalId
+    )
         public
         view
         override(Governor, GovernorTimelockDSPause)
@@ -58,12 +87,14 @@ contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, Gove
         return super.state(proposalId);
     }
 
-    function propose(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description)
-        public
-        override(Governor, IGovernor)
-        returns (uint256)
-    {
-        return super.propose(targets, values, calldatas, description);
+    function propose(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description
+    ) public override(Governor, IGovernor) returns (uint256 proposalId) {
+        proposalId = super.propose(targets, values, calldatas, description);
+        _proposers[proposalId] = msg.sender;
     }
 
     function proposalThreshold()
@@ -75,18 +106,46 @@ contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, Gove
         return super.proposalThreshold();
     }
 
-    function _execute(uint256 proposalId, address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
-        internal
-        override(Governor, GovernorTimelockDSPause)
-    {
+    function cancel(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 descriptionHash
+    ) public virtual returns (uint256) {
+        uint256 proposalId = hashProposal(
+            targets,
+            values,
+            calldatas,
+            descriptionHash
+        );
+        ProposalState currentState = state(proposalId);
+        require(
+            currentState == ProposalState.Pending,
+            "Governor: proposal can only be cancelled while pending."
+        );
+        require(
+            _msgSender() == proposalProposer(proposalId),
+            "Governor: only proposer can cancel"
+        );
+        return _cancel(targets, values, calldatas, descriptionHash);
+    }
+
+    function _execute(
+        uint256 proposalId,
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 descriptionHash
+    ) internal override(Governor, GovernorTimelockDSPause) {
         super._execute(proposalId, targets, values, calldatas, descriptionHash);
     }
 
-    function _cancel(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
-        internal
-        override(Governor, GovernorTimelockDSPause)
-        returns (uint256)
-    {
+    function _cancel(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 descriptionHash
+    ) internal override(Governor, GovernorTimelockDSPause) returns (uint256) {
         return super._cancel(targets, values, calldatas, descriptionHash);
     }
 
@@ -99,12 +158,33 @@ contract TaiGovernor is Governor, GovernorSettings, GovernorCountingSimple, Gove
         return super._executor();
     }
 
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(Governor, GovernorTimelockDSPause)
-        returns (bool)
-    {
+    /**
+     * @dev Returns the account that created a given proposal.
+     */
+    function proposalProposer(
+        uint256 proposalId
+    ) public view virtual returns (address) {
+        return _proposers[proposalId];
+    }
+
+    /**
+     * @dev Internal setter for the quorum percentage.
+     *
+     * Emits a {VotingDelaySet} event.
+     */
+    function _setQuorumPercentage(uint256 newPercentage) internal virtual {
+        require(
+            newPercentage >= MIN_QUORUM_PERCENTAGE &&
+                newPercentage <= MAX_QUORUM_PERCENTAGE,
+            "Governor: invalid quorum"
+        );
+        emit QuorumPercentageSet(quorumPercentage, newPercentage);
+        quorumPercentage = newPercentage;
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(Governor, GovernorTimelockDSPause) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }
