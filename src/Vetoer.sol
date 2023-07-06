@@ -23,25 +23,28 @@ contract TaiVetoer {
     /**
      * @notice Vetoes a scheduled proposal that has enough support.
      * @notice Parameters are the same as the proposal being vetoed.
-     * @notice Will only veto if the msg.sender has enough support delegated to it.
+     * @notice Will only veto if the proposal address has enough support delegated to it.
      */
     function vetoProposal(
-        address usr,
-        bytes calldata parameters,
+        address[] calldata usr,
+        bytes[] calldata parameters,
         uint eta
     ) external {
         require(
-            token.getPriorVotes(msg.sender, block.number - 50) >=
-                vetoThreshold(),
+            token.getPriorVotes(
+                getProposalAddress(usr, parameters, eta),
+                block.number - 5
+            ) >= vetoThreshold(),
             "insuficient support for vetoing this proposal"
         );
 
-        pause.abandonTransaction(
-            usr,
-            _getExtCodeHash(usr),
-            parameters,
-            eta
-        );
+        for (uint i; i < usr.length; i++)
+            pause.abandonTransaction(
+                usr[i],
+                _getExtCodeHash(usr[i]),
+                parameters[i],
+                eta
+            );
     }
 
     /**
@@ -49,6 +52,22 @@ contract TaiVetoer {
      */
     function vetoThreshold() public view returns (uint256) {
         return (token.totalSupply() * supplyPercentage) / 1000;
+    }
+
+    /**
+     * @notice Returns an address for a given proposal.
+     */
+    function getProposalAddress(
+        address[] memory usr,
+        bytes[] memory parameters,
+        uint eta
+    ) public pure returns (address addr) {
+        require(usr.length == parameters.length, "invalid data");
+        bytes32 hash = keccak256(abi.encode(usr, parameters, eta));
+        assembly {
+            mstore(0, hash)
+            addr := mload(0)
+        }
     }
 
     /**
