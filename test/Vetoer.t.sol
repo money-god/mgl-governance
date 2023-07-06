@@ -67,22 +67,6 @@ contract TaiVetoerTest is Test {
         assertEq(vetoer.vetoThreshold(), 800000 ether);
     }
 
-    mapping(address => bool) _seen;
-
-    /**
-     * forge-config: default.fuzz.runs = 10000
-     */
-    function testProposalCollision(
-        address[] memory usr,
-        bytes[] memory parameters,
-        uint eta
-    ) public {
-        if (usr.length != parameters.length) return;
-        address addr = vetoer.getProposalAddress(usr, parameters, eta);
-        assertFalse(_seen[addr]);
-        _seen[addr] = true;
-    }
-
     function testVetoProposal() public {
         // proposal data
         address usr = address(0x0dd);
@@ -93,24 +77,15 @@ contract TaiVetoerTest is Test {
         pause.scheduleTransaction(usr, _getExtCodeHash(usr), parameters, eta);
         assertEq(pause.currentlyScheduledTransactions(), 1);
 
-        // fetch the address of the proposal
-        address[] memory usrs = new address[](1);
-        usrs[0] = usr;
-
-        bytes[] memory params = new bytes[](1);
-        params[0] = parameters;
-
-        address proposalAddress = vetoer.getProposalAddress(usrs, params, eta);
-
         // mint tokens
         token.mint(address(this), 1000000 ether);
 
         // delegate to proposal
-        token.delegate(proposalAddress);
-        vm.roll(block.number + 5);
+        token.delegate(address(this));
+        vm.roll(block.number + 50);
 
         // veto
-        vetoer.vetoProposal(usrs, params, eta);
+        vetoer.vetoProposal(usr, parameters, eta);
         assertEq(pause.currentlyScheduledTransactions(), 0);
     }
 
@@ -124,26 +99,17 @@ contract TaiVetoerTest is Test {
         pause.scheduleTransaction(usr, _getExtCodeHash(usr), parameters, eta);
         assertEq(pause.currentlyScheduledTransactions(), 1);
 
-        // fetch the address of the proposal
-        address[] memory usrs = new address[](1);
-        usrs[0] = usr;
-
-        bytes[] memory params = new bytes[](1);
-        params[0] = parameters;
-
-        address proposalAddress = vetoer.getProposalAddress(usrs, params, eta);
-
         // mint tokens
         token.mint(address(this), 79999999);
         token.mint(address(0x0dd), 21111111);
 
         // delegate to proposal
-        token.delegate(proposalAddress);
-        vm.roll(block.number + 5);
+        token.delegate(address(this));
+        vm.roll(block.number + 50);
 
         // veto
         vm.expectRevert("insuficient support for vetoing this proposal");
-        vetoer.vetoProposal(usrs, params, eta);
+        vetoer.vetoProposal(usr, parameters, eta);
         assertEq(pause.currentlyScheduledTransactions(), 1);
     }
 
@@ -157,25 +123,16 @@ contract TaiVetoerTest is Test {
         pause.scheduleTransaction(usr, _getExtCodeHash(usr), parameters, eta);
         assertEq(pause.currentlyScheduledTransactions(), 1);
 
-        // fetch the address of the proposal
-        address[] memory usrs = new address[](1);
-        usrs[0] = usr;
-
-        bytes[] memory params = new bytes[](1);
-        params[0] = parameters;
-
-        address proposalAddress = vetoer.getProposalAddress(usrs, params, eta);
-
         // mint tokens
         token.mint(address(this), 1000000 ether);
 
         // delegate to proposal
-        token.delegate(proposalAddress);
-        vm.roll(block.number + 4);
+        token.delegate(address(this));
+        vm.roll(block.number + 49);
 
         // veto
         vm.expectRevert("insuficient support for vetoing this proposal");
-        vetoer.vetoProposal(usrs, params, eta);
+        vetoer.vetoProposal(usr, parameters, eta);
         assertEq(pause.currentlyScheduledTransactions(), 1);
     }
 
@@ -183,41 +140,31 @@ contract TaiVetoerTest is Test {
      * forge-config: default.fuzz.runs = 10000
      */
     function testVetoProposalFuzz(
-        address[] memory usrs,
-        bytes[] memory params,
+        address usr,
+        bytes memory params,
         uint eta
     ) public {
-        if (params.length != usrs.length) return;
-        if (params.length > 9) return; // pause proposal limit
-        if (eta < block.timestamp + pause.delay()) return;
+        if (eta < block.timestamp + pause.delay() || eta > block.timestamp + pause.MAX_DELAY()) return;
 
         // schedule proposal
-        for (uint i; i < usrs.length; i++) {
-            try
-                pause.scheduleTransaction(
-                    usrs[i],
-                    _getExtCodeHash(usrs[i]),
-                    params[i],
-                    eta
-                )
-            {} catch {
-                return;
-            }
-        }
+        pause.scheduleTransaction(
+            usr,
+            _getExtCodeHash(usr),
+            params,
+            eta
+        );
 
-        assertEq(pause.currentlyScheduledTransactions(), usrs.length);
-
-        address proposalAddress = vetoer.getProposalAddress(usrs, params, eta);
+        assertEq(pause.currentlyScheduledTransactions(), 1);
 
         // mint tokens
         token.mint(address(this), 1000000 ether);
 
         // delegate to proposal
-        token.delegate(proposalAddress);
-        vm.roll(block.number + 5);
+        token.delegate(address(this));
+        vm.roll(block.number + 50);
 
         // veto
-        vetoer.vetoProposal(usrs, params, eta);
+        vetoer.vetoProposal(usr, params, eta);
         assertEq(pause.currentlyScheduledTransactions(), 0);
     }
 }
